@@ -239,16 +239,31 @@ body::before {
 
 .project-link {
   color: var(--accent);
-  font-weight: 600;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(47, 111, 115, 0.28);
+  background: rgba(47, 111, 115, 0.08);
 }
 
 .project-link::after {
   content: "↗";
   font-size: 0.85em;
+}
+
+.project-link__badge {
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.project-link__text {
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .project-link:hover {

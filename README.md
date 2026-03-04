@@ -1,6 +1,6 @@
 # 环面围棋（单棋盘版）
 
-在线示例：https://torus-gomoku.pages.dev/
+在线示例：https://torus-go.pages.dev/
 
 **游戏规则**
 - 棋盘为环面拓扑：上下、左右边界相连。
