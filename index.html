@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>环面围棋</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="kicker">Torus Go</p>
+          <h1>环面围棋</h1>
+          <p class="sub">棋盘无边界，上下左右相连。默认使用 Chinese 规则，拖动平移，点击落子，连续停一手后结算。</p>
+        </div>
+        <div class="panel">
+          <div class="status">
+            <div class="status-row">
+              <span class="label">当前玩家</span>
+              <span id="current-player" class="value"></span>
+            </div>
+            <div class="status-row">
+              <span class="label">阶段</span>
+              <span id="phase" class="value text"></span>
+            </div>
+            <div class="status-row">
+              <span class="label">提子</span>
+              <span id="captures" class="value text"></span>
+            </div>
+            <div class="status-row">
+              <span class="label">连停</span>
+              <span id="passes" class="value text"></span>
+            </div>
+            <div class="status-row">
+              <span class="label">结果</span>
+              <span id="result" class="value"></span>
+            </div>
+            <div class="status-row">
+              <span class="label">规则</span>
+              <span id="ruleset" class="value text"></span>
+            </div>
+          </div>
+          <div class="controls">
+            <div class="control-row">
+              <label class="label" for="board-size">棋盘大小</label>
+              <div class="control-group">
+                <select id="board-size" class="select">
+                  <option value="9">9 x 9</option>
+                  <option value="13">13 x 13</option>
+                  <option value="19" selected>19 x 19</option>
+                </select>
+                <button id="apply-size-btn" class="btn secondary" type="button">
+                  应用
+                </button>
+              </div>
+            </div>
+            <div class="control-row">
+              <label class="label" for="mode-select">对弈模式</label>
+              <div class="control-group dual">
+                <select id="mode-select" class="select">
+                  <option value="pvp" selected>人人对弈</option>
+                  <option value="ai">人机对弈</option>
+                </select>
+                <select id="ai-color-select" class="select" disabled>
+                  <option value="white" selected>AI 执白</option>
+                  <option value="black">AI 执黑</option>
+                </select>
+              </div>
+            </div>
+            <p class="hint">调整大小会重置棋局</p>
+            <p class="hint">清理阶段可点击棋子标记死子。</p>
+            <div class="button-row">
+              <button id="pass-btn" class="btn secondary" type="button">停一手</button>
+              <button id="resume-btn" class="btn ghost" type="button">继续对局</button>
+              <button id="undo-btn" class="btn ghost" type="button">撤回</button>
+              <button id="reset-btn" class="btn" type="button">重置</button>
+            </div>
+            <a
+              class="project-link"
+              href="https://github.com/EmptyEmeraldTablet/Torus-Gomoku"
+              target="_blank"
+              rel="noopener"
+            >
+              GitHub 项目地址
+            </a>
+          </div>
+        </div>
+      </header>
+      <main class="board-area">
+        <div class="board-card">
+          <canvas
+            id="board-canvas"
+            width="720"
+            height="720"
+            aria-label="环面围棋棋盘"
+          ></canvas>
+          <div class="legend">
+            <span class="legend-item">
+              <span class="line solid"></span>
+              实线: 作为基准边
+            </span>
+            <span class="legend-item">
+              <span class="line dashed"></span>
+              虚线: 与对边连接
+            </span>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
