@@ -16,6 +16,17 @@ const modeSelect = document.getElementById(
 const aiColorSelect = document.getElementById(
   "ai-color-select",
 ) as HTMLSelectElement | null;
+const autoControlsEl = document.getElementById("auto-controls");
+const autoStepBtn = document.getElementById(
+  "auto-step-btn",
+) as HTMLButtonElement | null;
+const autoToggleBtn = document.getElementById(
+  "auto-toggle-btn",
+) as HTMLButtonElement | null;
+const autoIntervalInput = document.getElementById(
+  "auto-interval",
+) as HTMLInputElement | null;
+const autoIntervalValue = document.getElementById("auto-interval-value");
 const undoBtn = document.getElementById("undo-btn") as HTMLButtonElement | null;
 const resetBtn = document.getElementById("reset-btn");
 const passBtn = document.getElementById("pass-btn") as HTMLButtonElement | null;
@@ -38,6 +49,12 @@ let aiEnabled = false;
 let aiPlayer: PlayerColor = "white";
 let aiTimer: number | null = null;
 let latestBoard: BoardState | null = null;
+let playMode: "pvp" | "ai" | "auto" = "pvp";
+let autoRunning = false;
+let autoIntervalMs = autoIntervalInput
+  ? Number.parseInt(autoIntervalInput.value, 10)
+  : 600;
+let autoTimer: number | null = null;
 
 const game = new Game(canvas, {
   rows: DEFAULT_ROWS,
@@ -46,10 +63,12 @@ const game = new Game(canvas, {
 });
 
 resetBtn?.addEventListener("click", () => {
+  stopAuto();
   game.reset();
 });
 
 undoBtn?.addEventListener("click", () => {
+  stopAuto();
   game.undo();
 });
 
@@ -75,6 +94,33 @@ modeSelect?.addEventListener("change", () => {
 
 aiColorSelect?.addEventListener("change", () => {
   applyAiSettings();
+});
+
+autoStepBtn?.addEventListener("click", () => {
+  if (playMode !== "auto" || autoRunning) return;
+  const board = latestBoard;
+  if (!board || board.phase !== "play") return;
+  performAiMove(board);
+});
+
+autoToggleBtn?.addEventListener("click", () => {
+  if (playMode !== "auto") return;
+  if (autoRunning) {
+    stopAuto();
+  } else {
+    startAuto();
+  }
+});
+
+autoIntervalInput?.addEventListener("input", () => {
+  const value = Number.parseInt(autoIntervalInput.value, 10);
+  if (Number.isFinite(value)) {
+    autoIntervalMs = value;
+    updateIntervalLabel();
+    if (autoRunning) {
+      restartAutoTimer();
+    }
+  }
 });
 
 window.addEventListener("resize", () => {
@@ -125,11 +171,11 @@ function updateStatus(board: BoardState) {
   }
 
   if (undoBtn) {
-    undoBtn.disabled = board.moveHistory.length === 0;
+    undoBtn.disabled = board.moveHistory.length === 0 || autoRunning;
   }
 
   if (passBtn) {
-    passBtn.disabled = board.phase !== "play" || isAiTurn(board);
+    passBtn.disabled = !canHumanMove(board);
   }
 
   if (resumeBtn) {
@@ -137,6 +183,8 @@ function updateStatus(board: BoardState) {
   }
 
   scheduleAiMove(board);
+  scheduleAutoMove(board);
+  updateAutoUi(board);
 
   if (boardSizeSelect) {
     const sizeValue = String(board.rows);
@@ -155,30 +203,46 @@ function formatRuleset(rules: Ruleset) {
 }
 
 function applyAiSettings() {
-  aiEnabled = modeSelect?.value === "ai";
+  playMode = modeSelect?.value === "auto" ? "auto" : modeSelect?.value === "ai" ? "ai" : "pvp";
+  aiEnabled = playMode === "ai";
   const selected = aiColorSelect?.value;
   if (selected === "black" || selected === "white") {
     aiPlayer = selected;
   }
   if (aiColorSelect) {
-    aiColorSelect.disabled = !aiEnabled;
+    aiColorSelect.disabled = playMode !== "ai";
   }
-  const humanPlayer: PlayerColor | "both" = aiEnabled
+  if (autoControlsEl) {
+    autoControlsEl.hidden = playMode !== "auto";
+  }
+  if (playMode !== "auto") {
+    stopAuto();
+  }
+  const humanPlayer: PlayerColor | "both" | "none" = aiEnabled
     ? aiPlayer === "black"
       ? "white"
       : "black"
-    : "both";
+    : playMode === "auto"
+      ? "none"
+      : "both";
   game.setHumanPlayer(humanPlayer);
   if (!aiEnabled) {
     clearAiTimer();
   }
   if (latestBoard) {
     scheduleAiMove(latestBoard);
+    scheduleAutoMove(latestBoard);
+    updateAutoUi(latestBoard);
   }
 }
 
 function scheduleAiMove(board: BoardState) {
-  if (!aiEnabled || board.phase !== "play" || board.currentPlayer !== aiPlayer) {
+  if (
+    playMode !== "ai" ||
+    !aiEnabled ||
+    board.phase !== "play" ||
+    board.currentPlayer !== aiPlayer
+  ) {
     clearAiTimer();
     return;
   }
@@ -188,23 +252,14 @@ function scheduleAiMove(board: BoardState) {
     const current = latestBoard;
     if (
       !current ||
+      playMode !== "ai" ||
       !aiEnabled ||
       current.phase !== "play" ||
       current.currentPlayer !== aiPlayer
     ) {
       return;
     }
-    const decision = ai.chooseMove(current);
-    if (decision.type === "play") {
-      const applied = game.playAt(decision.coord);
-      if (!applied) {
-        window.setTimeout(() => {
-          if (latestBoard) scheduleAiMove(latestBoard);
-        }, 80);
-      }
-    } else {
-      game.pass();
-    }
+    performAiMove(current);
   }, 380);
 }
 
@@ -215,8 +270,98 @@ function clearAiTimer() {
   }
 }
 
-function isAiTurn(board: BoardState) {
-  return aiEnabled && board.phase === "play" && board.currentPlayer === aiPlayer;
+function canHumanMove(board: BoardState) {
+  if (board.phase !== "play") return false;
+  if (playMode === "auto") return false;
+  if (playMode === "ai") return board.currentPlayer !== aiPlayer;
+  return true;
 }
 
+function scheduleAutoMove(board: BoardState) {
+  if (playMode !== "auto") {
+    clearAutoTimer();
+    return;
+  }
+  if (board.phase !== "play") {
+    stopAuto();
+    return;
+  }
+  if (!autoRunning) {
+    clearAutoTimer();
+    return;
+  }
+  if (autoTimer !== null) return;
+  autoTimer = window.setTimeout(() => {
+    autoTimer = null;
+    const current = latestBoard;
+    if (!current || playMode !== "auto" || !autoRunning || current.phase !== "play") {
+      return;
+    }
+    performAiMove(current);
+    if (latestBoard) {
+      scheduleAutoMove(latestBoard);
+    }
+  }, autoIntervalMs);
+}
+
+function performAiMove(board: BoardState) {
+  const decision = ai.chooseMove(board);
+  if (decision.type === "play") {
+    const applied = game.playAt(decision.coord);
+    if (!applied) {
+      window.setTimeout(() => {
+        if (latestBoard) scheduleAiMove(latestBoard);
+        if (latestBoard) scheduleAutoMove(latestBoard);
+      }, 80);
+    }
+  } else {
+    game.pass();
+  }
+}
+
+function startAuto() {
+  autoRunning = true;
+  updateAutoUi(latestBoard);
+  if (latestBoard) {
+    scheduleAutoMove(latestBoard);
+  }
+}
+
+function stopAuto() {
+  if (!autoRunning && autoTimer === null) return;
+  autoRunning = false;
+  clearAutoTimer();
+  updateAutoUi(latestBoard);
+}
+
+function clearAutoTimer() {
+  if (autoTimer !== null) {
+    window.clearTimeout(autoTimer);
+    autoTimer = null;
+  }
+}
+
+function restartAutoTimer() {
+  clearAutoTimer();
+  if (latestBoard) {
+    scheduleAutoMove(latestBoard);
+  }
+}
+
+function updateIntervalLabel() {
+  if (autoIntervalValue) {
+    autoIntervalValue.textContent = `${autoIntervalMs} ms`;
+  }
+}
+
+function updateAutoUi(board: BoardState | null) {
+  if (!autoToggleBtn || !autoStepBtn) return;
+  const inAuto = playMode === "auto";
+  const canStep = Boolean(board && board.phase === "play");
+  autoToggleBtn.textContent = autoRunning ? "自动暂停" : "自动开始";
+  autoToggleBtn.disabled = !inAuto || !canStep;
+  autoStepBtn.disabled = !inAuto || autoRunning || !canStep;
+}
+
+updateIntervalLabel();
 applyAiSettings();

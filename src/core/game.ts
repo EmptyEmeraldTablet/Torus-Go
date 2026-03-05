@@ -45,7 +45,7 @@ export class Game {
   private input: InputHandler;
   private onStateChange?: (board: BoardState) => void;
   private rafHandle = 0;
-  private humanPlayer: PlayerColor | "both" = "both";
+  private humanPlayer: PlayerColor | "both" | "none" = "both";
 
   constructor(canvas: HTMLCanvasElement, options: GameOptions = {}) {
     const rows = options.rows ?? DEFAULT_ROWS;
@@ -170,7 +170,7 @@ export class Game {
     this.render();
   }
 
-  setHumanPlayer(player: PlayerColor | "both") {
+  setHumanPlayer(player: PlayerColor | "both" | "none") {
     this.humanPlayer = player;
   }
 
@@ -209,6 +209,9 @@ export class Game {
       return;
     }
 
+    if (this.humanPlayer === "none") {
+      return;
+    }
     if (
       this.humanPlayer !== "both" &&
       this.board.currentPlayer !== this.humanPlayer

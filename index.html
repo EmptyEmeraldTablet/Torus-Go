@@ -61,11 +61,36 @@
                 <select id="mode-select" class="select">
                   <option value="pvp" selected>人人对弈</option>
                   <option value="ai">人机对弈</option>
+                  <option value="auto">AI 自动对弈</option>
                 </select>
                 <select id="ai-color-select" class="select" disabled>
                   <option value="white" selected>AI 执白</option>
                   <option value="black">AI 执黑</option>
                 </select>
+              </div>
+            </div>
+            <div id="auto-controls" class="control-row" hidden>
+              <label class="label">自动落子</label>
+              <div class="control-group auto-group">
+                <button id="auto-step-btn" class="btn ghost" type="button">
+                  单步落子
+                </button>
+                <button id="auto-toggle-btn" class="btn secondary" type="button">
+                  自动开始
+                </button>
+              </div>
+              <div class="speed-row">
+                <span class="label small">间隔</span>
+                <input
+                  id="auto-interval"
+                  class="range"
+                  type="range"
+                  min="200"
+                  max="2000"
+                  step="100"
+                  value="600"
+                />
+                <span id="auto-interval-value" class="speed-value">600 ms</span>
               </div>
             </div>
             <p class="hint">调整大小会重置棋局</p>

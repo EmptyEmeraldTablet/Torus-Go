@@ -214,6 +214,33 @@ body::before {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.control-group.auto-group {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.speed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.label.small {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.range {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.speed-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 64px;
+  text-align: right;
+}
+
 .select {
   appearance: none;
   border: 1px solid rgba(59, 42, 28, 0.25);
@@ -334,6 +361,10 @@ body::before {
 
 @media (max-width: 640px) {
   .control-group.dual {
+    grid-template-columns: 1fr;
+  }
+
+  .control-group.auto-group {
     grid-template-columns: 1fr;
   }
 }
