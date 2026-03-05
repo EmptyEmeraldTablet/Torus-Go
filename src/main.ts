@@ -1,7 +1,7 @@
 import { Game } from "./core/game";
 import { BoardState, PlayerColor, Ruleset } from "./core/types";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./core/constants";
-import { SimpleAI } from "./ai/simple_ai";
+import { AiDecision, BoardSnapshot, MctsAI, MctsOptions } from "./ai/mcts_ai";
 
 const canvas = document.getElementById("board-canvas") as HTMLCanvasElement | null;
 const currentPlayerEl = document.getElementById("current-player");
@@ -16,6 +16,12 @@ const modeSelect = document.getElementById(
 const aiColorSelect = document.getElementById(
   "ai-color-select",
 ) as HTMLSelectElement | null;
+const aiStrengthBlackSelect = document.getElementById(
+  "ai-strength-black",
+) as HTMLSelectElement | null;
+const aiStrengthWhiteSelect = document.getElementById(
+  "ai-strength-white",
+) as HTMLSelectElement | null;
 const autoControlsEl = document.getElementById("auto-controls");
 const autoStepBtn = document.getElementById(
   "auto-step-btn",
@@ -27,6 +33,10 @@ const autoIntervalInput = document.getElementById(
   "auto-interval",
 ) as HTMLInputElement | null;
 const autoIntervalValue = document.getElementById("auto-interval-value");
+const thinkTimeInput = document.getElementById(
+  "think-time",
+) as HTMLInputElement | null;
+const thinkTimeValue = document.getElementById("think-time-value");
 const undoBtn = document.getElementById("undo-btn") as HTMLButtonElement | null;
 const resetBtn = document.getElementById("reset-btn");
 const passBtn = document.getElementById("pass-btn") as HTMLButtonElement | null;
@@ -44,7 +54,53 @@ if (!canvas) {
   throw new Error("Canvas element not found.");
 }
 
-const ai = new SimpleAI();
+const AI_STRENGTHS: Record<string, MctsOptions> = {
+  easy: {
+    iterations: 120,
+    playoutDepth: 45,
+    exploration: 1.6,
+    candidateLimit: 10,
+    rolloutUseHeuristic: false,
+    timeBudgetMs: 80,
+  },
+  medium: {
+    iterations: 450,
+    playoutDepth: 70,
+    exploration: 1.35,
+    candidateLimit: 14,
+    rolloutUseHeuristic: true,
+    timeBudgetMs: 220,
+  },
+  hard: {
+    iterations: 1200,
+    playoutDepth: 100,
+    exploration: 1.2,
+    candidateLimit: 18,
+    rolloutUseHeuristic: true,
+    timeBudgetMs: 520,
+  },
+};
+
+const aiOptionsByColor: Record<PlayerColor, MctsOptions> = {
+  black: AI_STRENGTHS.medium,
+  white: AI_STRENGTHS.medium,
+};
+const localAi = new MctsAI(AI_STRENGTHS.medium);
+let aiWorker: Worker | null =
+  typeof Worker !== "undefined"
+    ? new Worker(new URL("./ai/mcts_worker.ts", import.meta.url), {
+        type: "module",
+      })
+    : null;
+let aiRequestId = 0;
+const pendingAiRequests = new Map<number, (decision: AiDecision) => void>();
+let aiInFlight = false;
+type AiRequestStamp = {
+  moveCount: number;
+  currentPlayer: PlayerColor;
+  phase: BoardState["phase"];
+  mode: "ai" | "auto";
+};
 let aiEnabled = false;
 let aiPlayer: PlayerColor = "white";
 let aiTimer: number | null = null;
@@ -55,6 +111,26 @@ let autoIntervalMs = autoIntervalInput
   ? Number.parseInt(autoIntervalInput.value, 10)
   : 600;
 let autoTimer: number | null = null;
+let autoDelayOverrideMs: number | null = null;
+let thinkTimeMs = thinkTimeInput
+  ? Number.parseInt(thinkTimeInput.value, 10)
+  : 220;
+
+if (aiWorker) {
+  aiWorker.addEventListener("message", (event: MessageEvent) => {
+    const { id, decision } = event.data as { id: number; decision: AiDecision };
+    const resolver = pendingAiRequests.get(id);
+    if (resolver) {
+      pendingAiRequests.delete(id);
+      resolver(decision);
+    }
+  });
+  aiWorker.addEventListener("error", () => {
+    aiWorker = null;
+    pendingAiRequests.clear();
+    aiInFlight = false;
+  });
+}
 
 const game = new Game(canvas, {
   rows: DEFAULT_ROWS,
@@ -96,11 +172,19 @@ aiColorSelect?.addEventListener("change", () => {
   applyAiSettings();
 });
 
+aiStrengthBlackSelect?.addEventListener("change", () => {
+  applyAiStrength();
+});
+
+aiStrengthWhiteSelect?.addEventListener("change", () => {
+  applyAiStrength();
+});
+
 autoStepBtn?.addEventListener("click", () => {
-  if (playMode !== "auto" || autoRunning) return;
+  if (playMode !== "auto" || autoRunning || aiInFlight) return;
   const board = latestBoard;
   if (!board || board.phase !== "play") return;
-  performAiMove(board);
+  performAiMove(board, "auto");
 });
 
 autoToggleBtn?.addEventListener("click", () => {
@@ -118,8 +202,17 @@ autoIntervalInput?.addEventListener("input", () => {
     autoIntervalMs = value;
     updateIntervalLabel();
     if (autoRunning) {
+      autoDelayOverrideMs = null;
       restartAutoTimer();
     }
+  }
+});
+
+thinkTimeInput?.addEventListener("input", () => {
+  const value = Number.parseInt(thinkTimeInput.value, 10);
+  if (Number.isFinite(value)) {
+    thinkTimeMs = value;
+    updateThinkTimeLabel();
   }
 });
 
@@ -212,6 +305,7 @@ function applyAiSettings() {
   if (aiColorSelect) {
     aiColorSelect.disabled = playMode !== "ai";
   }
+  updateAiStrengthControls();
   if (autoControlsEl) {
     autoControlsEl.hidden = playMode !== "auto";
   }
@@ -234,6 +328,101 @@ function applyAiSettings() {
     scheduleAutoMove(latestBoard);
     updateAutoUi(latestBoard);
   }
+  applyAiStrength();
+}
+
+function applyAiStrength() {
+  const blackKey = aiStrengthBlackSelect?.value ?? "medium";
+  const whiteKey = aiStrengthWhiteSelect?.value ?? "medium";
+  const blackOptions = AI_STRENGTHS[blackKey] ?? AI_STRENGTHS.medium;
+  const whiteOptions = AI_STRENGTHS[whiteKey] ?? AI_STRENGTHS.medium;
+  aiOptionsByColor.black = blackOptions;
+  aiOptionsByColor.white = whiteOptions;
+}
+
+function updateAiStrengthControls() {
+  const inAi = playMode === "ai";
+  if (aiStrengthBlackSelect) {
+    aiStrengthBlackSelect.disabled =
+      playMode === "pvp" || (inAi && aiPlayer !== "black");
+  }
+  if (aiStrengthWhiteSelect) {
+    aiStrengthWhiteSelect.disabled =
+      playMode === "pvp" || (inAi && aiPlayer !== "white");
+  }
+}
+
+function getAiOptionsForPlayer(player: PlayerColor): MctsOptions {
+  const base = aiOptionsByColor[player] ?? AI_STRENGTHS.medium;
+  const budget = Number.isFinite(thinkTimeMs) ? thinkTimeMs : base.timeBudgetMs;
+  if (!budget || budget <= 0 || !Number.isFinite(budget)) {
+    return base;
+  }
+  const baseBudget = base.timeBudgetMs ?? budget;
+  const scaledIterations = base.timeBudgetMs
+    ? Math.max(40, Math.floor((base.iterations * budget) / baseBudget))
+    : base.iterations;
+  return {
+    ...base,
+    iterations: scaledIterations,
+    timeBudgetMs: budget,
+  };
+}
+
+function buildSnapshot(board: BoardState): BoardSnapshot {
+  return {
+    rows: board.rows,
+    cols: board.cols,
+    grid: board.grid.map((row) => row.slice()),
+    currentPlayer: board.currentPlayer,
+    koPoint: board.koPoint ? { ...board.koPoint } : null,
+    consecutivePasses: board.consecutivePasses,
+    rules: { ...board.rules },
+  };
+}
+
+function makeAiStamp(board: BoardState, mode: "ai" | "auto"): AiRequestStamp {
+  return {
+    moveCount: board.moveHistory.length,
+    currentPlayer: board.currentPlayer,
+    phase: board.phase,
+    mode,
+  };
+}
+
+function isAiStampCurrent(stamp: AiRequestStamp): boolean {
+  const board = latestBoard;
+  if (!board) return false;
+  if (playMode !== stamp.mode) return false;
+  if (board.moveHistory.length !== stamp.moveCount) return false;
+  if (board.currentPlayer !== stamp.currentPlayer) return false;
+  if (board.phase !== stamp.phase) return false;
+  if (stamp.mode === "ai") {
+    if (!aiEnabled) return false;
+    if (aiPlayer !== board.currentPlayer) return false;
+  }
+  return true;
+}
+
+function requestAiDecision(
+  snapshot: BoardSnapshot,
+  options: MctsOptions,
+): Promise<AiDecision> {
+  const worker = aiWorker;
+  if (worker) {
+    return new Promise((resolve) => {
+      const id = aiRequestId;
+      aiRequestId += 1;
+      pendingAiRequests.set(id, resolve);
+      worker.postMessage({ id, board: snapshot, options });
+    });
+  }
+  return new Promise((resolve) => {
+    window.setTimeout(() => {
+      localAi.setOptions(options);
+      resolve(localAi.chooseMove(snapshot));
+    }, 0);
+  });
 }
 
 function scheduleAiMove(board: BoardState) {
@@ -246,6 +435,7 @@ function scheduleAiMove(board: BoardState) {
     clearAiTimer();
     return;
   }
+  if (aiInFlight) return;
   if (aiTimer !== null) return;
   aiTimer = window.setTimeout(() => {
     aiTimer = null;
@@ -259,7 +449,7 @@ function scheduleAiMove(board: BoardState) {
     ) {
       return;
     }
-    performAiMove(current);
+    performAiMove(current, "ai");
   }, 380);
 }
 
@@ -290,37 +480,74 @@ function scheduleAutoMove(board: BoardState) {
     clearAutoTimer();
     return;
   }
+  if (aiInFlight) return;
   if (autoTimer !== null) return;
+  const delay = autoDelayOverrideMs ?? autoIntervalMs;
+  autoDelayOverrideMs = null;
   autoTimer = window.setTimeout(() => {
     autoTimer = null;
     const current = latestBoard;
     if (!current || playMode !== "auto" || !autoRunning || current.phase !== "play") {
       return;
     }
-    performAiMove(current);
+    performAiMove(current, "auto");
     if (latestBoard) {
       scheduleAutoMove(latestBoard);
     }
   }, autoIntervalMs);
 }
 
-function performAiMove(board: BoardState) {
-  const decision = ai.chooseMove(board);
-  if (decision.type === "play") {
-    const applied = game.playAt(decision.coord);
-    if (!applied) {
-      window.setTimeout(() => {
-        if (latestBoard) scheduleAiMove(latestBoard);
-        if (latestBoard) scheduleAutoMove(latestBoard);
-      }, 80);
-    }
-  } else {
-    game.pass();
+function performAiMove(board: BoardState, mode: "ai" | "auto") {
+  if (aiInFlight) return;
+  if (board.phase !== "play") return;
+  if (mode === "ai") {
+    if (!aiEnabled || board.currentPlayer !== aiPlayer) return;
   }
+  if (mode === "auto" && playMode !== "auto") return;
+
+  const snapshot = buildSnapshot(board);
+  const options = getAiOptionsForPlayer(board.currentPlayer);
+  const stamp = makeAiStamp(board, mode);
+  const startTime = mode === "auto" ? performance.now() : 0;
+  aiInFlight = true;
+
+  requestAiDecision(snapshot, options)
+    .then((decision) => {
+      aiInFlight = false;
+      if (!isAiStampCurrent(stamp)) return;
+      const autoDelay =
+        mode === "auto"
+          ? Math.max(0, autoIntervalMs - (performance.now() - startTime))
+          : null;
+      if (decision.type === "play") {
+        if (mode === "auto") {
+          autoDelayOverrideMs = autoDelay;
+        }
+        const applied = game.playAt(decision.coord);
+        if (!applied) {
+          if (mode === "auto") {
+            autoDelayOverrideMs = null;
+          }
+          window.setTimeout(() => {
+            if (latestBoard) scheduleAiMove(latestBoard);
+            if (latestBoard) scheduleAutoMove(latestBoard);
+          }, 80);
+        }
+      } else {
+        if (mode === "auto") {
+          autoDelayOverrideMs = autoDelay;
+        }
+        game.pass();
+      }
+    })
+    .catch(() => {
+      aiInFlight = false;
+    });
 }
 
 function startAuto() {
   autoRunning = true;
+  autoDelayOverrideMs = null;
   updateAutoUi(latestBoard);
   if (latestBoard) {
     scheduleAutoMove(latestBoard);
@@ -330,6 +557,7 @@ function startAuto() {
 function stopAuto() {
   if (!autoRunning && autoTimer === null) return;
   autoRunning = false;
+  autoDelayOverrideMs = null;
   clearAutoTimer();
   updateAutoUi(latestBoard);
 }
@@ -343,6 +571,7 @@ function clearAutoTimer() {
 
 function restartAutoTimer() {
   clearAutoTimer();
+  autoDelayOverrideMs = null;
   if (latestBoard) {
     scheduleAutoMove(latestBoard);
   }
@@ -354,14 +583,21 @@ function updateIntervalLabel() {
   }
 }
 
+function updateThinkTimeLabel() {
+  if (thinkTimeValue) {
+    thinkTimeValue.textContent = `${thinkTimeMs} ms`;
+  }
+}
+
 function updateAutoUi(board: BoardState | null) {
   if (!autoToggleBtn || !autoStepBtn) return;
   const inAuto = playMode === "auto";
   const canStep = Boolean(board && board.phase === "play");
   autoToggleBtn.textContent = autoRunning ? "自动暂停" : "自动开始";
   autoToggleBtn.disabled = !inAuto || !canStep;
-  autoStepBtn.disabled = !inAuto || autoRunning || !canStep;
+  autoStepBtn.disabled = !inAuto || autoRunning || !canStep || aiInFlight;
 }
 
 updateIntervalLabel();
+updateThinkTimeLabel();
 applyAiSettings();

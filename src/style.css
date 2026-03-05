@@ -210,8 +210,17 @@ body::before {
   align-items: center;
 }
 
+.control-group.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .control-group.dual {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.select-stack {
+  display: grid;
+  gap: 6px;
 }
 
 .control-group.auto-group {

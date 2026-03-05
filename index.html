@@ -69,6 +69,43 @@
                 </select>
               </div>
             </div>
+            <div class="control-row">
+              <label class="label">AI 强度</label>
+              <div class="control-group dual">
+                <div class="select-stack">
+                  <span class="label small">黑棋</span>
+                  <select id="ai-strength-black" class="select" disabled>
+                    <option value="easy">初级</option>
+                    <option value="medium" selected>中级</option>
+                    <option value="hard">高级</option>
+                  </select>
+                </div>
+                <div class="select-stack">
+                  <span class="label small">白棋</span>
+                  <select id="ai-strength-white" class="select" disabled>
+                    <option value="easy">初级</option>
+                    <option value="medium" selected>中级</option>
+                    <option value="hard">高级</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="control-row">
+              <label class="label">思考时间</label>
+              <div class="speed-row">
+                <span class="label small">每步</span>
+                <input
+                  id="think-time"
+                  class="range"
+                  type="range"
+                  min="40"
+                  max="2000"
+                  step="20"
+                  value="220"
+                />
+                <span id="think-time-value" class="speed-value">220 ms</span>
+              </div>
+            </div>
             <div id="auto-controls" class="control-row" hidden>
               <label class="label">自动落子</label>
               <div class="control-group auto-group">
