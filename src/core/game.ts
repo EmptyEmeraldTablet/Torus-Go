@@ -12,6 +12,7 @@ import {
   BoardState,
   Coord,
   GameResult,
+  GameLoadRecord,
   MoveRecord,
   PlaceRequest,
   PlayerColor,
@@ -119,26 +120,7 @@ export class Game {
 
   pass() {
     if (this.board.phase !== "play") return;
-    const player = this.board.currentPlayer;
-    const record: MoveRecord = {
-      player,
-      coord: null,
-      captured: [],
-      prevKo: this.board.koPoint,
-      prevPasses: this.board.consecutivePasses,
-    };
-
-    this.board.koPoint = null;
-    this.board.consecutivePasses += 1;
-    this.board.moveHistory.push(record);
-    this.board.currentPlayer = OPPONENT[player];
-
-    if (this.board.consecutivePasses >= 2) {
-      this.enterScoringPhase();
-    }
-
-    this.notifyState();
-    this.render();
+    this.passInternal(false, true);
   }
 
   resumePlay() {
@@ -172,6 +154,75 @@ export class Game {
 
   setHumanPlayer(player: PlayerColor | "both" | "none") {
     this.humanPlayer = player;
+  }
+
+  loadRecord(record: GameLoadRecord) {
+    const sameSize =
+      record.rows === this.board.rows && record.cols === this.board.cols;
+    if (!sameSize) {
+      const nextBoard = createBoard(record.rows, record.cols);
+      nextBoard.rules = { ...this.board.rules };
+      this.board = nextBoard;
+      this.camera = new CameraController(record.rows, record.cols);
+      this.renderer.setBoardSize(record.rows, record.cols);
+    }
+    this.board.grid = createEmptyGrid(record.rows, record.cols);
+    this.board.deadMap = createEmptyFlagGrid(
+      record.rows,
+      record.cols,
+    );
+    this.board.currentPlayer = record.nextPlayer ?? "black";
+    this.board.moveHistory = [];
+    this.board.koPoint = null;
+    this.board.consecutivePasses = 0;
+    this.board.captures = { black: 0, white: 0 };
+    this.board.result = null;
+    this.board.phase = "play";
+    this.board.rules = {
+      ...this.board.rules,
+      komi: record.komi ?? this.board.rules.komi,
+    };
+    this.camera.reset();
+
+    for (const coord of record.setup.black) {
+      this.board.grid[coord.row][coord.col] = "black";
+    }
+    for (const coord of record.setup.white) {
+      this.board.grid[coord.row][coord.col] = "white";
+    }
+    for (const coord of record.setup.empty) {
+      this.board.grid[coord.row][coord.col] = null;
+    }
+
+    for (const move of record.moves) {
+      this.board.currentPlayer = move.player;
+      if (move.coord) {
+        this.placeAtBoardCoord(move.coord, true);
+      } else {
+        this.passInternal(true, false);
+      }
+    }
+
+    if (record.moves.length === 0 && record.nextPlayer) {
+      this.board.currentPlayer = record.nextPlayer;
+    }
+
+    if (this.board.consecutivePasses >= 2) {
+      this.enterScoringPhase();
+    }
+
+    this.notifyState();
+    this.render();
+  }
+
+  moveView(dr: number, dc: number) {
+    this.camera.move(dr, dc);
+    this.render();
+  }
+
+  resetView() {
+    this.camera.reset();
+    this.render();
   }
 
   playAt(coord: Coord): boolean {
@@ -222,7 +273,32 @@ export class Game {
     this.placeAtBoardCoord({ row: r, col: c });
   };
 
-  private placeAtBoardCoord(coord: Coord): boolean {
+  private passInternal(silent: boolean, allowScoring: boolean) {
+    const player = this.board.currentPlayer;
+    const record: MoveRecord = {
+      player,
+      coord: null,
+      captured: [],
+      prevKo: this.board.koPoint,
+      prevPasses: this.board.consecutivePasses,
+    };
+
+    this.board.koPoint = null;
+    this.board.consecutivePasses += 1;
+    this.board.moveHistory.push(record);
+    this.board.currentPlayer = OPPONENT[player];
+
+    if (allowScoring && this.board.consecutivePasses >= 2) {
+      this.enterScoringPhase();
+    }
+
+    if (!silent) {
+      this.notifyState();
+      this.render();
+    }
+  }
+
+  private placeAtBoardCoord(coord: Coord, silent = false): boolean {
     if (this.board.result) return false;
     const { row: r, col: c } = coord;
     if (this.board.grid[r][c] !== null) return false;
@@ -268,9 +344,10 @@ export class Game {
     });
     this.board.currentPlayer = opponent;
     this.clearDeadMap();
-
-    this.notifyState();
-    this.render();
+    if (!silent) {
+      this.notifyState();
+      this.render();
+    }
     return true;
   }
 

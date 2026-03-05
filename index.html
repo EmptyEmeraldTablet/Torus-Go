@@ -133,6 +133,15 @@
             <p class="hint">调整大小会重置棋局</p>
             <p class="hint">清理阶段可点击棋子标记死子。</p>
             <div class="button-row">
+              <button id="sgf-save-btn" class="btn ghost" type="button">
+                导出 SGF
+              </button>
+              <button id="sgf-load-btn" class="btn ghost" type="button">
+                导入 SGF
+              </button>
+              <input id="sgf-file-input" type="file" accept=".sgf" hidden />
+            </div>
+            <div class="button-row">
               <button id="pass-btn" class="btn secondary" type="button">停一手</button>
               <button id="resume-btn" class="btn ghost" type="button">继续对局</button>
               <button id="undo-btn" class="btn ghost" type="button">撤回</button>
@@ -152,12 +161,51 @@
       </header>
       <main class="board-area">
         <div class="board-card">
-          <canvas
-            id="board-canvas"
-            width="720"
-            height="720"
-            aria-label="环面围棋棋盘"
-          ></canvas>
+          <div class="board-shell">
+            <button
+              id="nav-up"
+              class="board-nav board-nav--up"
+              type="button"
+              aria-label="向上移动棋盘"
+            >
+              ↑
+            </button>
+            <button
+              id="nav-right"
+              class="board-nav board-nav--right"
+              type="button"
+              aria-label="向右移动棋盘"
+            >
+              →
+            </button>
+            <button
+              id="nav-down"
+              class="board-nav board-nav--down"
+              type="button"
+              aria-label="向下移动棋盘"
+            >
+              ↓
+            </button>
+            <button
+              id="nav-left"
+              class="board-nav board-nav--left"
+              type="button"
+              aria-label="向左移动棋盘"
+            >
+              ←
+            </button>
+            <canvas
+              id="board-canvas"
+              width="720"
+              height="720"
+              aria-label="环面围棋棋盘"
+            ></canvas>
+          </div>
+          <div class="board-actions">
+            <button id="view-reset-btn" class="btn ghost small" type="button">
+              视角回正
+            </button>
+          </div>
           <div class="legend">
             <span class="legend-item">
               <span class="line solid"></span>

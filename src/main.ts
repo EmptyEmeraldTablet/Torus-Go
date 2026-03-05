@@ -1,7 +1,13 @@
 import { Game } from "./core/game";
-import { BoardState, PlayerColor, Ruleset } from "./core/types";
+import {
+  BoardState,
+  GameLoadRecord,
+  PlayerColor,
+  Ruleset,
+} from "./core/types";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./core/constants";
 import { AiDecision, BoardSnapshot, MctsAI, MctsOptions } from "./ai/mcts_ai";
+import { parseSgf, serializeSgf, SgfCoordStyle } from "./sgf";
 
 const canvas = document.getElementById("board-canvas") as HTMLCanvasElement | null;
 const currentPlayerEl = document.getElementById("current-player");
@@ -49,6 +55,22 @@ const boardSizeSelect = document.getElementById(
 const applySizeBtn = document.getElementById(
   "apply-size-btn",
 ) as HTMLButtonElement | null;
+const navUpBtn = document.getElementById("nav-up") as HTMLButtonElement | null;
+const navDownBtn = document.getElementById("nav-down") as HTMLButtonElement | null;
+const navLeftBtn = document.getElementById("nav-left") as HTMLButtonElement | null;
+const navRightBtn = document.getElementById("nav-right") as HTMLButtonElement | null;
+const viewResetBtn = document.getElementById(
+  "view-reset-btn",
+) as HTMLButtonElement | null;
+const sgfSaveBtn = document.getElementById(
+  "sgf-save-btn",
+) as HTMLButtonElement | null;
+const sgfLoadBtn = document.getElementById(
+  "sgf-load-btn",
+) as HTMLButtonElement | null;
+const sgfFileInput = document.getElementById(
+  "sgf-file-input",
+) as HTMLInputElement | null;
 
 if (!canvas) {
   throw new Error("Canvas element not found.");
@@ -115,6 +137,8 @@ let autoDelayOverrideMs: number | null = null;
 let thinkTimeMs = thinkTimeInput
   ? Number.parseInt(thinkTimeInput.value, 10)
   : 220;
+let sgfCoordStyle: SgfCoordStyle = "skip-i";
+let sgfSetup: GameLoadRecord["setup"] | null = null;
 
 if (aiWorker) {
   aiWorker.addEventListener("message", (event: MessageEvent) => {
@@ -140,6 +164,8 @@ const game = new Game(canvas, {
 
 resetBtn?.addEventListener("click", () => {
   stopAuto();
+  sgfSetup = null;
+  sgfCoordStyle = "skip-i";
   game.reset();
 });
 
@@ -160,8 +186,65 @@ applySizeBtn?.addEventListener("click", () => {
   if (!boardSizeSelect) return;
   const size = Number.parseInt(boardSizeSelect.value, 10);
   if (Number.isFinite(size) && size > 0) {
+    sgfSetup = null;
+    sgfCoordStyle = "skip-i";
     game.setBoardSize(size, size);
   }
+});
+
+navUpBtn?.addEventListener("click", () => {
+  game.moveView(-1, 0);
+});
+
+navDownBtn?.addEventListener("click", () => {
+  game.moveView(1, 0);
+});
+
+navLeftBtn?.addEventListener("click", () => {
+  game.moveView(0, -1);
+});
+
+navRightBtn?.addEventListener("click", () => {
+  game.moveView(0, 1);
+});
+
+viewResetBtn?.addEventListener("click", () => {
+  game.resetView();
+});
+
+sgfSaveBtn?.addEventListener("click", () => {
+  const board = latestBoard;
+  if (!board) return;
+  const sgf = serializeSgf(board, sgfCoordStyle, sgfSetup ?? undefined);
+  downloadSgf(sgf);
+});
+
+sgfLoadBtn?.addEventListener("click", () => {
+  sgfFileInput?.click();
+});
+
+sgfFileInput?.addEventListener("change", () => {
+  const file = sgfFileInput.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const content = typeof reader.result === "string" ? reader.result : "";
+    try {
+      stopAuto();
+      clearAiTimer();
+      cancelPendingAi();
+      const record = parseSgf(content, DEFAULT_ROWS, DEFAULT_COLS);
+      sgfCoordStyle = record.coordStyle;
+      sgfSetup = record.setup;
+      game.loadRecord(record);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "SGF 解析失败。";
+      window.alert(message);
+    }
+  };
+  reader.readAsText(file);
+  sgfFileInput.value = "";
 });
 
 modeSelect?.addEventListener("change", () => {
@@ -460,6 +543,11 @@ function clearAiTimer() {
   }
 }
 
+function cancelPendingAi() {
+  aiInFlight = false;
+  pendingAiRequests.clear();
+}
+
 function canHumanMove(board: BoardState) {
   if (board.phase !== "play") return false;
   if (playMode === "auto") return false;
@@ -575,6 +663,26 @@ function restartAutoTimer() {
   if (latestBoard) {
     scheduleAutoMove(latestBoard);
   }
+}
+
+function downloadSgf(sgf: string) {
+  const blob = new Blob([sgf], { type: "application/x-go-sgf" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `torus-go-${formatDateStamp()}.sgf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function formatDateStamp() {
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }
 
 function updateIntervalLabel() {

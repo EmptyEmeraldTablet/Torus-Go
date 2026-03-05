@@ -53,6 +53,19 @@ export type BoardState = {
   rules: Ruleset;
 };
 
+export type GameLoadRecord = {
+  rows: number;
+  cols: number;
+  komi?: number;
+  setup: {
+    black: Coord[];
+    white: Coord[];
+    empty: Coord[];
+  };
+  moves: Array<{ player: PlayerColor; coord: Coord | null }>;
+  nextPlayer?: PlayerColor;
+};
+
 export type RenderMetrics = {
   boardX: number;
   boardY: number;
